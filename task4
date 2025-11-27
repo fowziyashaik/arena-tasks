@@ -1,0 +1,167 @@
+import java.util.*;
+import java.io.*;
+
+class Employee implements Serializable {
+    private int id;
+    private String name;
+    private String department;
+    private double salary;
+
+    public Employee(int id, String name, String department, double salary) {
+        this.id = id;
+        this.name = name;
+        this.department = department;
+        this.salary = salary;
+    }
+
+    public int getId() { return id; }
+    public String getName() { return name; }
+    public String getDepartment() { return department; }
+    public double getSalary() { return salary; }
+
+    public void setName(String name) { this.name = name; }
+    public void setDepartment(String department) { this.department = department; }
+    public void setSalary(double salary) { this.salary = salary; }
+
+    @Override
+    public String toString() {
+        return id + " | " + name + " | " + department + " | " + salary;
+    }
+}
+
+public class EmployeeManagementSystem {
+
+    private static ArrayList<Employee> employees = new ArrayList<>();
+    private static final String FILE_NAME = "employees.dat";
+
+    public static void main(String[] args) {
+        loadFromFile();
+        Scanner sc = new Scanner(System.in);
+
+        while (true) {
+            System.out.println("\n===== Employee Management System =====");
+            System.out.println("1. Add Employee");
+            System.out.println("2. View Employees");
+            System.out.println("3. Update Employee");
+            System.out.println("4. Delete Employee");
+            System.out.println("5. Exit");
+            System.out.print("Enter choice: ");
+
+            int choice = sc.nextInt();
+            sc.nextLine();
+
+            switch (choice) {
+                case 1:
+                    addEmployee(sc);
+                    break;
+                case 2:
+                    displayEmployees();
+                    break;
+                case 3:
+                    updateEmployee(sc);
+                    break;
+                case 4:
+                    deleteEmployee(sc);
+                    break;
+                case 5:
+                    saveToFile();
+                    System.out.println("Exiting...");
+                    System.exit(0);
+                default:
+                    System.out.println("Invalid choice!");
+            }
+        }
+    }
+
+    // CREATE
+    private static void addEmployee(Scanner sc) {
+        System.out.print("Enter ID: ");
+        int id = sc.nextInt();
+        sc.nextLine();
+
+        System.out.print("Enter Name: ");
+        String name = sc.nextLine();
+
+        System.out.print("Enter Department: ");
+        String dept = sc.nextLine();
+
+        System.out.print("Enter Salary: ");
+        double sal = sc.nextDouble();
+
+        employees.add(new Employee(id, name, dept, sal));
+        saveToFile();
+        System.out.println("Employee added!");
+    }
+
+    // READ
+    private static void displayEmployees() {
+        if (employees.isEmpty()) {
+            System.out.println("No employees found!");
+        } else {
+            System.out.println("\n--- Employee List ---");
+            for (Employee e : employees) {
+                System.out.println(e);
+            }
+        }
+    }
+
+    // UPDATE
+    private static void updateEmployee(Scanner sc) {
+        System.out.print("Enter Employee ID to Update: ");
+        int uid = sc.nextInt();
+        sc.nextLine();
+
+        for (Employee e : employees) {
+            if (e.getId() == uid) {
+                System.out.print("New Name: ");
+                e.setName(sc.nextLine());
+
+                System.out.print("New Department: ");
+                e.setDepartment(sc.nextLine());
+
+                System.out.print("New Salary: ");
+                e.setSalary(sc.nextDouble());
+
+                saveToFile();
+                System.out.println("Employee updated!");
+                return;
+            }
+        }
+        System.out.println("Employee not found!");
+    }
+
+    // DELETE
+    private static void deleteEmployee(Scanner sc) {
+        System.out.print("Enter Employee ID to Delete: ");
+        int did = sc.nextInt();
+
+        Iterator<Employee> it = employees.iterator();
+        while (it.hasNext()) {
+            if (it.next().getId() == did) {
+                it.remove();
+                saveToFile();
+                System.out.println("Employee deleted!");
+                return;
+            }
+        }
+        System.out.println("Employee not found!");
+    }
+
+    // SAVE FILE
+    private static void saveToFile() {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(FILE_NAME))) {
+            out.writeObject(employees);
+        } catch (Exception e) {
+            System.out.println("Error saving file.");
+        }
+    }
+
+    // LOAD FILE
+    private static void loadFromFile() {
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(FILE_NAME))) {
+            employees = (ArrayList<Employee>) in.readObject();
+        } catch (Exception e) {
+            System.out.println("Starting with empty data...");
+        }
+    }
+}
