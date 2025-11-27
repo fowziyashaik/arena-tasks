@@ -1,0 +1,447 @@
+/**
+ * DataBackupSystem.java
+ *
+ * Single-file Data Backup System with:
+ *  - object serialization to versioned files
+ *  - metadata management (saved to metadata.dat)
+ *  - list / restore / delete versions
+ *  - retention policy (keep last N versions)
+ *
+ * Usage:
+ *   - Run the program and use menu to backup / list / restore objects.
+ *   - For demo purposes the CLI can create demo serializable objects (SimpleRecord).
+ *
+ * Note:
+ *   - This is a demonstration. For production, consider additional features:
+ *       encryption, checksums, atomic writes, concurrency controls, storage abstraction, large-object streaming.
+ */
+
+import java.io.*;
+import java.nio.file.*;
+import java.text.SimpleDateFormat;
+import java.util.*;
+
+public class DataBackupSystem {
+
+    /* ---------- Models ---------- */
+
+    // metadata entry for each backup version
+    static class BackupEntry implements Serializable {
+        private static final long serialVersionUID = 1L;
+        int version;
+        String filename;        // relative to backups directory
+        long timestampMillis;
+        long fileSizeBytes;
+
+        BackupEntry(int version, String filename, long timestampMillis, long fileSizeBytes) {
+            this.version = version;
+            this.filename = filename;
+            this.timestampMillis = timestampMillis;
+            this.fileSizeBytes = fileSizeBytes;
+        }
+
+        String getFormattedTime() {
+            return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(timestampMillis));
+        }
+
+        @Override
+        public String toString() {
+            return String.format("v%d  | %s | %s | %d bytes", version, filename, getFormattedTime(), fileSizeBytes);
+        }
+    }
+
+    // top-level metadata persisted to disk
+    static class BackupMetadata implements Serializable {
+        private static final long serialVersionUID = 1L;
+        // key -> list of versions (ordered by version number ascending)
+        HashMap<String, ArrayList<BackupEntry>> index = new HashMap<>();
+        // next version number per key (optional convenience)
+        HashMap<String, Integer> nextVersion = new HashMap<>();
+    }
+
+    /* ---------- Backup Manager ---------- */
+
+    static class BackupManager {
+        private final Path baseDir;
+        private final Path backupsDir;
+        private final Path metadataPath;
+        private BackupMetadata metadata;
+
+        BackupManager(String baseDirectory) throws IOException {
+            this.baseDir = Paths.get(baseDirectory);
+            this.backupsDir = baseDir.resolve("backups");
+            this.metadataPath = baseDir.resolve("metadata.dat");
+
+            if (!Files.exists(baseDir)) Files.createDirectories(baseDir);
+            if (!Files.exists(backupsDir)) Files.createDirectories(backupsDir);
+
+            loadMetadata();
+        }
+
+        // Load metadata (or initialize empty)
+        @SuppressWarnings("unchecked")
+        private void loadMetadata() {
+            if (Files.exists(metadataPath)) {
+                try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(metadataPath))) {
+                    metadata = (BackupMetadata) ois.readObject();
+                } catch (Exception e) {
+                    System.out.println("Warning: failed to read metadata.dat — starting fresh metadata.");
+                    metadata = new BackupMetadata();
+                }
+            } else {
+                metadata = new BackupMetadata();
+            }
+        }
+
+        // Save metadata to disk (atomic-ish by writing to temp and moving)
+        private synchronized void persistMetadata() {
+            Path tmp = metadataPath.resolveSibling("metadata.dat.tmp");
+            try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(tmp))) {
+                oos.writeObject(metadata);
+                oos.flush();
+                Files.move(tmp, metadataPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (Exception e) {
+                System.out.println("Error saving metadata: " + e.getMessage());
+            } finally {
+                try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
+            }
+        }
+
+        // Backup a Serializable object with a string key (e.g., "users", "config", "invoice-123")
+        public synchronized BackupEntry backupObject(String key, Serializable obj) throws IOException {
+            int ver = metadata.nextVersion.getOrDefault(key, 1);
+            long ts = System.currentTimeMillis();
+            String filename = String.format("%s_v%d_%d.bak", sanitizeFilename(key), ver, ts);
+            Path outPath = backupsDir.resolve(filename);
+
+            // write object
+            try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(outPath))) {
+                oos.writeObject(obj);
+            }
+
+            long size = Files.size(outPath);
+            BackupEntry entry = new BackupEntry(ver, filename, ts, size);
+
+            // update metadata
+            metadata.index.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
+            metadata.nextVersion.put(key, ver + 1);
+            persistMetadata();
+
+            return entry;
+        }
+
+        // List versions for a key
+        public List<BackupEntry> listVersions(String key) {
+            return metadata.index.getOrDefault(key, new ArrayList<>());
+        }
+
+        // Restore specific version for a key. If version == -1, restore latest.
+        public synchronized Object restore(String key, int version) throws IOException, ClassNotFoundException {
+            ArrayList<BackupEntry> list = metadata.index.get(key);
+            if (list == null || list.isEmpty()) throw new FileNotFoundException("No backups found for key: " + key);
+
+            BackupEntry target = null;
+            if (version == -1) { // latest
+                target = list.get(list.size() - 1);
+            } else {
+                for (BackupEntry e : list) if (e.version == version) { target = e; break; }
+            }
+            if (target == null) throw new FileNotFoundException("Version not found for key: " + key);
+
+            Path inPath = backupsDir.resolve(target.filename);
+            if (!Files.exists(inPath)) throw new FileNotFoundException("Backup file missing: " + inPath);
+
+            try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(inPath))) {
+                Object obj = ois.readObject();
+                return obj;
+            }
+        }
+
+        // Delete a specific version. If version == -1, delete all versions (clear key).
+        public synchronized boolean deleteVersion(String key, int version) {
+            ArrayList<BackupEntry> list = metadata.index.get(key);
+            if (list == null || list.isEmpty()) return false;
+
+            if (version == -1) {
+                // delete all files
+                for (BackupEntry e : list) try { Files.deleteIfExists(backupsDir.resolve(e.filename)); } catch (IOException ignored) {}
+                metadata.index.remove(key);
+                metadata.nextVersion.remove(key);
+                persistMetadata();
+                return true;
+            } else {
+                Iterator<BackupEntry> it = list.iterator();
+                boolean removed = false;
+                while (it.hasNext()) {
+                    BackupEntry e = it.next();
+                    if (e.version == version) {
+                        try { Files.deleteIfExists(backupsDir.resolve(e.filename)); } catch (IOException ignored) {}
+                        it.remove();
+                        removed = true;
+                        break;
+                    }
+                }
+                if (list.isEmpty()) {
+                    metadata.index.remove(key);
+                    metadata.nextVersion.remove(key);
+                }
+                if (removed) persistMetadata();
+                return removed;
+            }
+        }
+
+        // Retention: keep only last N versions for a key (delete older ones)
+        public synchronized void applyRetention(String key, int keepLastN) {
+            if (keepLastN <= 0) return;
+            ArrayList<BackupEntry> list = metadata.index.get(key);
+            if (list == null || list.size() <= keepLastN) return;
+
+            int toRemove = list.size() - keepLastN;
+            for (int i = 0; i < toRemove; ++i) {
+                BackupEntry e = list.get(i);
+                try { Files.deleteIfExists(backupsDir.resolve(e.filename)); } catch (IOException ignored) {}
+            }
+            ArrayList<BackupEntry> newList = new ArrayList<>(list.subList(toRemove, list.size()));
+            metadata.index.put(key, newList);
+            persistMetadata();
+        }
+
+        // Helper: sanitize key to create a safe filename
+        private String sanitizeFilename(String s) {
+            return s.replaceAll("[^a-zA-Z0-9\\-_.]", "_");
+        }
+
+        // Utility: print index summary
+        public void printIndexSummary() {
+            System.out.println("\n--- Backup Index Summary ---");
+            if (metadata.index.isEmpty()) { System.out.println("(no backups yet)"); return; }
+            for (String key : metadata.index.keySet()) {
+                ArrayList<BackupEntry> list = metadata.index.get(key);
+                System.out.println("Key: " + key + "  (" + list.size() + " versions)");
+                for (BackupEntry e : list) System.out.println("  " + e);
+            }
+        }
+
+        // For testing/demo: create directory listing
+        public void printBackupFiles() {
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(backupsDir)) {
+                System.out.println("\nFiles in backups folder:");
+                for (Path p : ds) {
+                    System.out.println("  " + p.getFileName());
+                }
+            } catch (IOException e) {
+                System.out.println("Error listing backup files: " + e.getMessage());
+            }
+        }
+    }
+
+    /* ---------- Demo Serializable Object ---------- */
+
+    // Simple demo record used by CLI to create test backups
+    static class SimpleRecord implements Serializable {
+        private static final long serialVersionUID = 1L;
+        String title;
+        Map<String, String> attributes;
+
+        SimpleRecord(String title) {
+            this.title = title;
+            this.attributes = new LinkedHashMap<>();
+        }
+        void put(String k, String v) { attributes.put(k, v); }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("SimpleRecord: ").append(title).append("\n");
+            for (Map.Entry<String,String> e : attributes.entrySet()) {
+                sb.append("  - ").append(e.getKey()).append(": ").append(e.getValue()).append("\n");
+            }
+            return sb.toString();
+        }
+    }
+
+    /* ---------- CLI & Main ---------- */
+
+    private static final Scanner SC = new Scanner(System.in);
+
+    public static void main(String[] args) throws Exception {
+        System.out.println("Data Backup System (single-file demo)");
+        BackupManager mgr = new BackupManager("data_backup_store");
+
+        boolean running = true;
+        while (running) {
+            printMenu();
+            String choice = SC.nextLine().trim();
+            switch (choice) {
+                case "1":
+                    demoBackupFlow(mgr);
+                    break;
+                case "2":
+                    backupArbitraryObject(mgr);
+                    break;
+                case "3":
+                    listVersionsCLI(mgr);
+                    break;
+                case "4":
+                    restoreCLI(mgr);
+                    break;
+                case "5":
+                    deleteCLI(mgr);
+                    break;
+                case "6":
+                    retentionCLI(mgr);
+                    break;
+                case "7":
+                    mgr.printIndexSummary();
+                    break;
+                case "8":
+                    mgr.printBackupFiles();
+                    break;
+                case "9":
+                    System.out.println("Exiting.");
+                    running = false;
+                    break;
+                default:
+                    System.out.println("Invalid option.");
+            }
+        }
+    }
+
+    private static void printMenu() {
+        System.out.println("\n=== Menu ===");
+        System.out.println("1) Demo: create & backup a SimpleRecord object");
+        System.out.println("2) Backup a text object (enter text -> will be wrapped as SimpleRecord)");
+        System.out.println("3) List versions for a key");
+        System.out.println("4) Restore a version (or latest)");
+        System.out.println("5) Delete a version (or all for a key)");
+        System.out.println("6) Apply retention (keep last N versions for a key)");
+        System.out.println("7) Show metadata index summary");
+        System.out.println("8) Show backup files folder listing");
+        System.out.println("9) Exit");
+        System.out.print("Choose: ");
+    }
+
+    private static void demoBackupFlow(BackupManager mgr) {
+        try {
+            System.out.print("Enter key for this backup (e.g., users, config): ");
+            String key = SC.nextLine().trim();
+            if (key.isEmpty()) { System.out.println("Key cannot be empty."); return; }
+
+            SimpleRecord r = new SimpleRecord("Demo record for " + key);
+            System.out.print("Enter a short description: ");
+            r.put("desc", SC.nextLine());
+            System.out.print("Enter owner name: ");
+            r.put("owner", SC.nextLine());
+            System.out.print("Enter notes (optional): ");
+            r.put("notes", SC.nextLine());
+
+            BackupEntry e = mgr.backupObject(key, r);
+            System.out.println("Backed up: " + e);
+        } catch (Exception ex) {
+            System.out.println("Backup failed: " + ex.getMessage());
+            ex.printStackTrace(System.out);
+        }
+    }
+
+    private static void backupArbitraryObject(BackupManager mgr) {
+        try {
+            System.out.print("Enter key for this backup: ");
+            String key = SC.nextLine().trim();
+            if (key.isEmpty()) { System.out.println("Key cannot be empty."); return; }
+
+            System.out.println("Enter multi-line text to store (single line '.' finishes):");
+            StringBuilder sb = new StringBuilder();
+            while (true) {
+                String line = SC.nextLine();
+                if (line.equals(".")) break;
+                sb.append(line).append("\n");
+            }
+            SimpleRecord r = new SimpleRecord("TextBackup");
+            r.put("text", sb.toString());
+            BackupEntry e = mgr.backupObject(key, r);
+            System.out.println("Backed up text as: " + e);
+        } catch (Exception ex) {
+            System.out.println("Backup failed: " + ex.getMessage());
+            ex.printStackTrace(System.out);
+        }
+    }
+
+    private static void listVersionsCLI(BackupManager mgr) {
+        System.out.print("Enter key to list versions: ");
+        String key = SC.nextLine().trim();
+        List<BackupEntry> list = mgr.listVersions(key);
+        if (list.isEmpty()) {
+            System.out.println("No versions found for key: " + key);
+        } else {
+            System.out.println("Versions for key: " + key);
+            for (BackupEntry e : list) System.out.println("  " + e);
+        }
+    }
+
+    private static void restoreCLI(BackupManager mgr) {
+        try {
+            System.out.print("Enter key to restore: ");
+            String key = SC.nextLine().trim();
+            System.out.print("Enter version to restore (enter 'latest' for latest): ");
+            String v = SC.nextLine().trim();
+            int ver = -1;
+            if (!v.equalsIgnoreCase("latest")) {
+                try { ver = Integer.parseInt(v); } catch (NumberFormatException nfe) { System.out.println("Invalid version."); return; }
+            }
+
+            Object obj = mgr.restore(key, ver);
+            System.out.println("\n--- Restored Object (toString) ---");
+            System.out.println(obj == null ? "(null)" : obj.toString());
+
+            // Also write restored object to a 'restored' file for convenience
+            if (obj != null) {
+                String outName = String.format("restored_%s_v%s.ser", key.replaceAll("[^a-zA-Z0-9\\-_.]", "_"), (ver == -1 ? "latest" : ver));
+                Path out = Paths.get("data_backup_store").resolve(outName);
+                try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(out))) {
+                    oos.writeObject((Serializable) obj);
+                    System.out.println("Also saved restored object to: " + out.toAbsolutePath());
+                } catch (Exception writeErr) {
+                    System.out.println("Failed to save restored object to disk: " + writeErr.getMessage());
+                }
+            }
+        } catch (Exception ex) {
+            System.out.println("Restore failed: " + ex.getMessage());
+            ex.printStackTrace(System.out);
+        }
+    }
+
+    private static void deleteCLI(BackupManager mgr) {
+        System.out.print("Enter key to delete from: ");
+        String key = SC.nextLine().trim();
+        System.out.print("Enter version to delete (enter 'all' to delete all versions): ");
+        String v = SC.nextLine().trim();
+        boolean ok = false;
+        if (v.equalsIgnoreCase("all")) {
+            ok = mgr.deleteVersion(key, -1);
+            System.out.println(ok ? "All versions deleted for key: " + key : "No versions found for key: " + key);
+        } else {
+            try {
+                int ver = Integer.parseInt(v);
+                ok = mgr.deleteVersion(key, ver);
+                System.out.println(ok ? "Deleted version " + ver + " for key: " + key : "Version not found.");
+            } catch (NumberFormatException nfe) {
+                System.out.println("Invalid version.");
+            }
+        }
+    }
+
+    private static void retentionCLI(BackupManager mgr) {
+        System.out.print("Enter key to apply retention: ");
+        String key = SC.nextLine().trim();
+        System.out.print("Keep last N versions (enter N): ");
+        String nStr = SC.nextLine().trim();
+        try {
+            int n = Integer.parseInt(nStr);
+            if (n < 0) { System.out.println("N must be >= 0."); return; }
+            mgr.applyRetention(key, n);
+            System.out.println("Retention applied. Now keeping last " + n + " versions for key: " + key);
+        } catch (NumberFormatException nfe) {
+            System.out.println("Invalid number.");
+        }
+    }
+}
