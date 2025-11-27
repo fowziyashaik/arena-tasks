@@ -1,0 +1,260 @@
+import java.util.*;
+
+// ---------------- PRODUCT CLASS ----------------
+class Product {
+    private int id;
+    private String name;
+    private String category;
+    private int quantity;
+    private double price;
+
+    public Product(int id, String name, String category, int quantity, double price) {
+        this.id = id;
+        this.name = name;
+        this.category = category;
+        this.quantity = quantity;
+        this.price = price;
+    }
+
+    public int getId() { return id; }
+    public String getName() { return name.toLowerCase(); }
+    public String getCategory() { return category.toLowerCase(); }
+    public int getQuantity() { return quantity; }
+    public double getPrice() { return price; }
+
+    public void setName(String name) { this.name = name; }
+    public void setCategory(String category) { this.category = category; }
+    public void setQuantity(int quantity) { this.quantity = quantity; }
+    public void setPrice(double price) { this.price = price; }
+
+    @Override
+    public String toString() {
+        return id + " | " + name + " | " + category + " | Qty: " + quantity + " | ₹" + price;
+    }
+}
+
+// ---------------- INVENTORY CLASS ----------------
+class Inventory {
+    private HashMap<Integer, Product> products = new HashMap<>();
+
+    // ADD PRODUCT
+    public void addProduct(Product p) {
+        products.put(p.getId(), p);
+        System.out.println("Product added successfully!");
+    }
+
+    // UPDATE PRODUCT
+    public boolean updateProduct(int id, String name, String category, int qty, double price) {
+        if (!products.containsKey(id)) return false;
+
+        Product p = products.get(id);
+        p.setName(name);
+        p.setCategory(category);
+        p.setQuantity(qty);
+        p.setPrice(price);
+        return true;
+    }
+
+    // DELETE PRODUCT
+    public boolean deleteProduct(int id) {
+        return products.remove(id) != null;
+    }
+
+    // DISPLAY ALL
+    public void displayAll() {
+        if (products.isEmpty()) {
+            System.out.println("No products available.");
+            return;
+        }
+        System.out.println("\n--- Inventory List ---");
+        for (Product p : products.values()) {
+            System.out.println(p);
+        }
+    }
+
+    // SEARCH BY ID
+    public Product searchById(int id) {
+        return products.get(id);
+    }
+
+    // SEARCH BY NAME (partial match)
+    public List<Product> searchByName(String key) {
+        List<Product> result = new ArrayList<>();
+        key = key.toLowerCase();
+
+        for (Product p : products.values()) {
+            if (p.getName().contains(key))
+                result.add(p);
+        }
+        return result;
+    }
+
+    // SEARCH BY CATEGORY
+    public List<Product> searchByCategory(String category) {
+        List<Product> result = new ArrayList<>();
+        category = category.toLowerCase();
+
+        for (Product p : products.values()) {
+            if (p.getCategory().equals(category))
+                result.add(p);
+        }
+        return result;
+    }
+
+    // SORTING OPTIONS
+    public void sortByName() {
+        ArrayList<Product> list = new ArrayList<>(products.values());
+        list.sort(Comparator.comparing(Product::getName));
+        displaySorted(list);
+    }
+
+    public void sortByPrice() {
+        ArrayList<Product> list = new ArrayList<>(products.values());
+        list.sort(Comparator.comparing(Product::getPrice));
+        displaySorted(list);
+    }
+
+    public void sortByQuantity() {
+        ArrayList<Product> list = new ArrayList<>(products.values());
+        list.sort(Comparator.comparing(Product::getQuantity));
+        displaySorted(list);
+    }
+
+    private void displaySorted(List<Product> list) {
+        System.out.println("\n--- Sorted Products ---");
+        for (Product p : list)
+            System.out.println(p);
+    }
+}
+
+// ---------------- MAIN SYSTEM ----------------
+public class InventoryManagementSystem {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        Inventory inventory = new Inventory();
+
+        while (true) {
+            System.out.println("\n===== Inventory Management System =====");
+            System.out.println("1. Add Product");
+            System.out.println("2. View All Products");
+            System.out.println("3. Search Product by ID");
+            System.out.println("4. Search Product by Name");
+            System.out.println("5. Search Product by Category");
+            System.out.println("6. Sort by Name");
+            System.out.println("7. Sort by Price");
+            System.out.println("8. Sort by Quantity");
+            System.out.println("9. Update Product");
+            System.out.println("10. Delete Product");
+            System.out.println("11. Exit");
+            System.out.print("Enter choice: ");
+
+            int ch = sc.nextInt();
+            sc.nextLine();
+
+            switch (ch) {
+
+                case 1:
+                    System.out.print("Enter ID: ");
+                    int id = sc.nextInt(); sc.nextLine();
+
+                    System.out.print("Enter Name: ");
+                    String name = sc.nextLine();
+
+                    System.out.print("Enter Category: ");
+                    String cat = sc.nextLine();
+
+                    System.out.print("Enter Quantity: ");
+                    int qty = sc.nextInt();
+
+                    System.out.print("Enter Price: ");
+                    double price = sc.nextDouble();
+
+                    inventory.addProduct(new Product(id, name, cat, qty, price));
+                    break;
+
+                case 2:
+                    inventory.displayAll();
+                    break;
+
+                case 3:
+                    System.out.print("Enter Product ID: ");
+                    int sid = sc.nextInt();
+                    Product p = inventory.searchById(sid);
+                    System.out.println(p != null ? p : "Product not found.");
+                    break;
+
+                case 4:
+                    System.out.print("Enter name keyword: ");
+                    String key = sc.nextLine();
+                    List<Product> nameList = inventory.searchByName(key);
+                    displayList(nameList);
+                    break;
+
+                case 5:
+                    System.out.print("Enter category: ");
+                    String c = sc.nextLine();
+                    List<Product> catList = inventory.searchByCategory(c);
+                    displayList(catList);
+                    break;
+
+                case 6:
+                    inventory.sortByName();
+                    break;
+
+                case 7:
+                    inventory.sortByPrice();
+                    break;
+
+                case 8:
+                    inventory.sortByQuantity();
+                    break;
+
+                case 9:
+                    System.out.print("Enter product ID to update: ");
+                    int uid = sc.nextInt(); sc.nextLine();
+
+                    System.out.print("New Name: ");
+                    String uname = sc.nextLine();
+
+                    System.out.print("New Category: ");
+                    String ucat = sc.nextLine();
+
+                    System.out.print("New Quantity: ");
+                    int uqty = sc.nextInt();
+
+                    System.out.print("New Price: ");
+                    double uprice = sc.nextDouble();
+
+                    if (inventory.updateProduct(uid, uname, ucat, uqty, uprice))
+                        System.out.println("Product updated!");
+                    else
+                        System.out.println("Product not found!");
+                    break;
+
+                case 10:
+                    System.out.print("Enter product ID to delete: ");
+                    int did = sc.nextInt();
+                    if (inventory.deleteProduct(did))
+                        System.out.println("Deleted!");
+                    else
+                        System.out.println("Product not found!");
+                    break;
+
+                case 11:
+                    System.out.println("Exiting...");
+                    System.exit(0);
+
+                default:
+                    System.out.println("Invalid choice!");
+            }
+        }
+    }
+
+    // helper to display product lists
+    private static void displayList(List<Product> list) {
+        if (list.isEmpty())
+            System.out.println("No matching products.");
+        else
+            list.forEach(System.out::println);
+    }
+}
