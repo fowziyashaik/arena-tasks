@@ -1,0 +1,175 @@
+import java.util.*;
+
+// ----------------------- Product Superclass -----------------------
+abstract class Product {
+    protected int id;
+    protected String name;
+    protected double price;
+
+    public Product(int id, String name, double price) {
+        this.id = id;
+        this.name = name;
+        this.price = price;
+    }
+
+    public int getId() { return id; }
+    public String getName() { return name; }
+    public double getPrice() { return price; }
+
+    public abstract String getDetails(); // polymorphism
+
+    @Override
+    public String toString() {
+        return id + " | " + name + " | Rs." + price + " | " + getDetails();
+    }
+}
+
+// ----------------------- Electronics Class -----------------------
+class Electronics extends Product {
+    private int warrantyMonths;
+
+    public Electronics(int id, String name, double price, int warrantyMonths) {
+        super(id, name, price);
+        this.warrantyMonths = warrantyMonths;
+    }
+
+    @Override
+    public String getDetails() {
+        return "Electronics - Warranty: " + warrantyMonths + " months";
+    }
+}
+
+// ----------------------- Clothing Class -----------------------
+class Clothing extends Product {
+    private String size;
+
+    public Clothing(int id, String name, double price, String size) {
+        super(id, name, price);
+        this.size = size;
+    }
+
+    @Override
+    public String getDetails() {
+        return "Clothing - Size: " + size;
+    }
+}
+
+// ----------------------- Books Class -----------------------
+class Books extends Product {
+    private String author;
+
+    public Books(int id, String name, double price, String author) {
+        super(id, name, price);
+        this.author = author;
+    }
+
+    @Override
+    public String getDetails() {
+        return "Book - Author: " + author;
+    }
+}
+
+// ----------------------- Shopping Cart -----------------------
+class ShoppingCart {
+    private ArrayList<Product> cart = new ArrayList<>();
+
+    public void addProduct(Product p) {
+        cart.add(p);
+        System.out.println(p.getName() + " added to cart.");
+    }
+
+    public void removeProduct(int id) {
+        for (Product p : cart) {
+            if (p.getId() == id) {
+                cart.remove(p);
+                System.out.println("Removed: " + p.getName());
+                return;
+            }
+        }
+        System.out.println("Product not found in cart.");
+    }
+
+    public void viewCart() {
+        if (cart.isEmpty()) {
+            System.out.println("Cart is empty.");
+            return;
+        }
+        System.out.println("\n--- Your Cart ---");
+        double total = 0;
+        for (Product p : cart) {
+            System.out.println(p);
+            total += p.getPrice();
+        }
+        System.out.println("Total Amount: Rs." + total);
+    }
+}
+
+// ----------------------- Main System -----------------------
+public class EcommerceSystem {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+
+        ArrayList<Product> products = new ArrayList<>();
+        ShoppingCart cart = new ShoppingCart();
+
+        // Pre-loaded product list
+        products.add(new Electronics(1, "Laptop", 55000, 24));
+        products.add(new Electronics(2, "Earbuds", 1500, 6));
+        products.add(new Clothing(3, "T-Shirt", 499, "M"));
+        products.add(new Clothing(4, "Jeans", 999, "L"));
+        products.add(new Books(5, "Java Programming", 799, "James Gosling"));
+        products.add(new Books(6, "Atomic Habits", 499, "James Clear"));
+
+        while (true) {
+            System.out.println("\n===== E-Commerce System =====");
+            System.out.println("1. View Products");
+            System.out.println("2. Add Product to Cart");
+            System.out.println("3. Remove Product from Cart");
+            System.out.println("4. View Cart");
+            System.out.println("5. Exit");
+            System.out.print("Enter choice: ");
+
+            int choice = sc.nextInt();
+
+            switch (choice) {
+                case 1:
+                    System.out.println("\n--- Available Products ---");
+                    for (Product p : products)
+                        System.out.println(p);
+                    break;
+
+                case 2:
+                    System.out.print("Enter Product ID to Add: ");
+                    int idAdd = sc.nextInt();
+                    boolean foundAdd = false;
+
+                    for (Product p : products) {
+                        if (p.getId() == idAdd) {
+                            cart.addProduct(p);
+                            foundAdd = true;
+                            break;
+                        }
+                    }
+                    if (!foundAdd) System.out.println("Invalid Product ID!");
+                    break;
+
+                case 3:
+                    System.out.print("Enter Product ID to Remove: ");
+                    int idRemove = sc.nextInt();
+                    cart.removeProduct(idRemove);
+                    break;
+
+                case 4:
+                    cart.viewCart();
+                    break;
+
+                case 5:
+                    System.out.println("Thanks for shopping!");
+                    System.exit(0);
+
+                default:
+                    System.out.println("Invalid choice!");
+            }
+        }
+    }
+}
