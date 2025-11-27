@@ -1,0 +1,51 @@
+import java.util.*;
+
+public class GradeManagementSystem {
+
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+
+        System.out.print("Enter number of students: ");
+        int n = sc.nextInt();
+
+        String[] names = new String[n];
+        int[] marks = new int[n];
+        char[] grades = new char[n];
+
+        for (int i = 0; i < n; i++) {
+            System.out.print("\nEnter name of student " + (i + 1) + ": ");
+            names[i] = sc.next();
+
+            System.out.print("Enter marks of " + names[i] + " (0-100): ");
+            marks[i] = sc.nextInt();
+
+            grades[i] = getGrade(marks[i]);
+        }
+
+        // Calculate class average
+        double avg = calculateAverage(marks);
+
+        System.out.println("\n----- STUDENT REPORT -----");
+        for (int i = 0; i < n; i++) {
+            System.out.println(names[i] + "\t Marks: " + marks[i] + "\t Grade: " + grades[i]);
+        }
+
+        System.out.println("\nClass Average: " + avg);
+    }
+
+    // Function to calculate grade
+    public static char getGrade(int marks) {
+        if (marks >= 90) return 'A';
+        else if (marks >= 75) return 'B';
+        else if (marks >= 60) return 'C';
+        else if (marks >= 40) return 'D';
+        else return 'F';
+    }
+
+    // Function to calculate average
+    public static double calculateAverage(int[] marks) {
+        int sum = 0;
+        for (int m : marks) sum += m;
+        return (double) sum / marks.length;
+    }
+}
