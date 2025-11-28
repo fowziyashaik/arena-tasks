@@ -1,0 +1,789 @@
+# Library Management System (Java Swing + SQLite)
+
+This project contains a complete desktop Library Management application implemented in Java using Swing for the GUI and SQLite (via JDBC) for storage. Save each section below as the named file in a single Java project (package `library`). A `pom.xml` is included for Maven build.
+
+---
+
+## files included
+
+- pom.xml
+- README.md
+- src/main/java/library/Main.java
+- src/main/java/library/Database.java
+- src/main/java/library/models/Book.java
+- src/main/java/library/models/Member.java
+- src/main/java/library/models/Loan.java
+- src/main/java/library/dao/BookDAO.java
+- src/main/java/library/dao/MemberDAO.java
+- src/main/java/library/dao/LoanDAO.java
+- src/main/java/library/ui/LibraryGUI.java
+- src/main/java/library/ui/BookPanel.java
+- src/main/java/library/ui/MemberPanel.java
+- src/main/java/library/ui/LoanPanel.java
+- src/main/resources/schema.sql
+
+---
+
+## pom.xml
+```xml
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>library-management</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+  </properties>
+  <dependencies>
+    <!-- SQLite JDBC -->
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+      <version>3.42.0.0</version>
+    </dependency>
+  </dependencies>
+</project>
+```
+
+---
+
+## src/main/resources/schema.sql
+```sql
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS books (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  isbn TEXT UNIQUE,
+  title TEXT NOT NULL,
+  author TEXT,
+  publisher TEXT,
+  year INTEGER,
+  copies INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id TEXT UNIQUE,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT
+);
+
+CREATE TABLE IF NOT EXISTS loans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id INTEGER NOT NULL,
+  member_id INTEGER NOT NULL,
+  loan_date TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  return_date TEXT,
+  FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
+  FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE
+);
+```
+
+---
+
+## src/main/java/library/Database.java
+```java
+package library;
+
+import java.sql.*;
+import java.nio.file.*;
+import java.io.InputStream;
+import java.util.Scanner;
+
+public class Database {
+    private static final String DB_FILE = "library.db";
+    private static final String URL = "jdbc:sqlite:" + DB_FILE;
+
+    static {
+        try {
+            Class.forName("org.sqlite.JDBC");
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static Connection getConnection() throws SQLException {
+        Connection conn = DriverManager.getConnection(URL);
+        try (Statement st = conn.createStatement()) {
+            st.execute("PRAGMA foreign_keys = ON");
+        }
+        return conn;
+    }
+
+    public static void init() {
+        // create DB if not exists and run schema.sql
+        try (Connection c = getConnection()) {
+            InputStream in = Database.class.getResourceAsStream("/schema.sql");
+            if (in == null) {
+                System.err.println("schema.sql not found in resources");
+                return;
+            }
+            Scanner s = new Scanner(in).useDelimiter(";\s*");
+            while (s.hasNext()) {
+                String sql = s.next().trim();
+                if (!sql.isEmpty()) {
+                    try (Statement st = c.createStatement()) {
+                        st.execute(sql);
+                    } catch (SQLException ex) {
+                        // ignore individual statement errors but print
+                        System.err.println("Schema statement error: " + ex.getMessage());
+                    }
+                }
+            }
+            s.close();
+            System.out.println("Database initialized: " + DB_FILE);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+---
+
+## src/main/java/library/models/Book.java
+```java
+package library.models;
+
+public class Book {
+    private int id;
+    private String isbn;
+    private String title;
+    private String author;
+    private String publisher;
+    private int year;
+    private int copies;
+
+    public Book() {}
+
+    public Book(int id, String isbn, String title, String author, String publisher, int year, int copies) {
+        this.id = id; this.isbn = isbn; this.title = title; this.author = author; this.publisher = publisher; this.year = year; this.copies = copies;
+    }
+
+    // getters and setters
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+    public String getIsbn() { return isbn; }
+    public void setIsbn(String isbn) { this.isbn = isbn; }
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+    public String getAuthor() { return author; }
+    public void setAuthor(String author) { this.author = author; }
+    public String getPublisher() { return publisher; }
+    public void setPublisher(String publisher) { this.publisher = publisher; }
+    public int getYear() { return year; }
+    public void setYear(int year) { this.year = year; }
+    public int getCopies() { return copies; }
+    public void setCopies(int copies) { this.copies = copies; }
+}
+```
+
+---
+
+## src/main/java/library/models/Member.java
+```java
+package library.models;
+
+public class Member {
+    private int id;
+    private String memberId;
+    private String name;
+    private String email;
+    private String phone;
+
+    public Member() {}
+
+    public Member(int id, String memberId, String name, String email, String phone) {
+        this.id = id; this.memberId = memberId; this.name = name; this.email = email; this.phone = phone;
+    }
+
+    // getters/setters
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+    public String getMemberId() { return memberId; }
+    public void setMemberId(String memberId) { this.memberId = memberId; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
+}
+```
+
+---
+
+## src/main/java/library/models/Loan.java
+```java
+package library.models;
+
+public class Loan {
+    private int id;
+    private int bookId;
+    private int memberId;
+    private String loanDate; // ISO date strings
+    private String dueDate;
+    private String returnDate;
+
+    public Loan() {}
+
+    public Loan(int id, int bookId, int memberId, String loanDate, String dueDate, String returnDate) {
+        this.id = id; this.bookId = bookId; this.memberId = memberId; this.loanDate = loanDate; this.dueDate = dueDate; this.returnDate = returnDate;
+    }
+
+    // getters/setters
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+    public int getBookId() { return bookId; }
+    public void setBookId(int bookId) { this.bookId = bookId; }
+    public int getMemberId() { return memberId; }
+    public void setMemberId(int memberId) { this.memberId = memberId; }
+    public String getLoanDate() { return loanDate; }
+    public void setLoanDate(String loanDate) { this.loanDate = loanDate; }
+    public String getDueDate() { return dueDate; }
+    public void setDueDate(String dueDate) { this.dueDate = dueDate; }
+    public String getReturnDate() { return returnDate; }
+    public void setReturnDate(String returnDate) { this.returnDate = returnDate; }
+}
+```
+
+---
+
+## src/main/java/library/dao/BookDAO.java
+```java
+package library.dao;
+
+import library.models.Book;
+import library.Database;
+
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class BookDAO {
+    public void add(Book b) throws SQLException {
+        String sql = "INSERT INTO books(isbn,title,author,publisher,year,copies) VALUES(?,?,?,?,?,?)";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setString(1, b.getIsbn());
+            p.setString(2, b.getTitle());
+            p.setString(3, b.getAuthor());
+            p.setString(4, b.getPublisher());
+            p.setInt(5, b.getYear());
+            p.setInt(6, b.getCopies());
+            p.executeUpdate();
+        }
+    }
+
+    public void update(Book b) throws SQLException {
+        String sql = "UPDATE books SET isbn=?,title=?,author=?,publisher=?,year=?,copies=? WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setString(1, b.getIsbn());
+            p.setString(2, b.getTitle());
+            p.setString(3, b.getAuthor());
+            p.setString(4, b.getPublisher());
+            p.setInt(5, b.getYear());
+            p.setInt(6, b.getCopies());
+            p.setInt(7, b.getId());
+            p.executeUpdate();
+        }
+    }
+
+    public void delete(int id) throws SQLException {
+        String sql = "DELETE FROM books WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setInt(1, id);
+            p.executeUpdate();
+        }
+    }
+
+    public Book findById(int id) throws SQLException {
+        String sql = "SELECT * FROM books WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setInt(1, id);
+            try (ResultSet r = p.executeQuery()) {
+                if (r.next()) return map(r);
+            }
+        }
+        return null;
+    }
+
+    public List<Book> search(String q) throws SQLException {
+        String sql = "SELECT * FROM books WHERE title LIKE ? OR author LIKE ? OR isbn LIKE ?";
+        List<Book> out = new ArrayList<>();
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            String like = "%" + q + "%";
+            p.setString(1, like); p.setString(2, like); p.setString(3, like);
+            try (ResultSet r = p.executeQuery()) {
+                while (r.next()) out.add(map(r));
+            }
+        }
+        return out;
+    }
+
+    public List<Book> all() throws SQLException {
+        String sql = "SELECT * FROM books";
+        List<Book> out = new ArrayList<>();
+        try (Connection c = Database.getConnection(); Statement s = c.createStatement(); ResultSet r = s.executeQuery(sql)) {
+            while (r.next()) out.add(map(r));
+        }
+        return out;
+    }
+
+    private Book map(ResultSet r) throws SQLException {
+        Book b = new Book();
+        b.setId(r.getInt("id"));
+        b.setIsbn(r.getString("isbn"));
+        b.setTitle(r.getString("title"));
+        b.setAuthor(r.getString("author"));
+        b.setPublisher(r.getString("publisher"));
+        b.setYear(r.getInt("year"));
+        b.setCopies(r.getInt("copies"));
+        return b;
+    }
+}
+```
+
+---
+
+## src/main/java/library/dao/MemberDAO.java
+```java
+package library.dao;
+
+import library.models.Member;
+import library.Database;
+
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class MemberDAO {
+    public void add(Member m) throws SQLException {
+        String sql = "INSERT INTO members(member_id,name,email,phone) VALUES(?,?,?,?)";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setString(1, m.getMemberId()); p.setString(2, m.getName()); p.setString(3, m.getEmail()); p.setString(4, m.getPhone());
+            p.executeUpdate();
+        }
+    }
+
+    public void update(Member m) throws SQLException {
+        String sql = "UPDATE members SET member_id=?,name=?,email=?,phone=? WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setString(1, m.getMemberId()); p.setString(2, m.getName()); p.setString(3, m.getEmail()); p.setString(4, m.getPhone()); p.setInt(5, m.getId());
+            p.executeUpdate();
+        }
+    }
+
+    public void delete(int id) throws SQLException {
+        String sql = "DELETE FROM members WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setInt(1, id); p.executeUpdate();
+        }
+    }
+
+    public Member findById(int id) throws SQLException {
+        String sql = "SELECT * FROM members WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setInt(1, id);
+            try (ResultSet r = p.executeQuery()) { if (r.next()) return map(r); }
+        }
+        return null;
+    }
+
+    public List<Member> search(String q) throws SQLException {
+        String sql = "SELECT * FROM members WHERE name LIKE ? OR member_id LIKE ?";
+        List<Member> out = new ArrayList<>();
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            String like = "%" + q + "%";
+            p.setString(1, like); p.setString(2, like);
+            try (ResultSet r = p.executeQuery()) { while (r.next()) out.add(map(r)); }
+        }
+        return out;
+    }
+
+    public List<Member> all() throws SQLException {
+        String sql = "SELECT * FROM members";
+        List<Member> out = new ArrayList<>();
+        try (Connection c = Database.getConnection(); Statement s = c.createStatement(); ResultSet r = s.executeQuery(sql)) { while (r.next()) out.add(map(r)); }
+        return out;
+    }
+
+    private Member map(ResultSet r) throws SQLException {
+        Member m = new Member();
+        m.setId(r.getInt("id"));
+        m.setMemberId(r.getString("member_id"));
+        m.setName(r.getString("name"));
+        m.setEmail(r.getString("email"));
+        m.setPhone(r.getString("phone"));
+        return m;
+    }
+}
+```
+
+---
+
+## src/main/java/library/dao/LoanDAO.java
+```java
+package library.dao;
+
+import library.models.Loan;
+import library.Database;
+
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class LoanDAO {
+    public void lend(Loan l) throws SQLException {
+        String sql = "INSERT INTO loans(book_id,member_id,loan_date,due_date,return_date) VALUES(?,?,?,?,?)";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setInt(1, l.getBookId()); p.setInt(2, l.getMemberId()); p.setString(3, l.getLoanDate()); p.setString(4, l.getDueDate()); p.setString(5, l.getReturnDate());
+            p.executeUpdate();
+        }
+    }
+
+    public void markReturned(int loanId, String returnDate) throws SQLException {
+        String sql = "UPDATE loans SET return_date=? WHERE id=?";
+        try (Connection c = Database.getConnection(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setString(1, returnDate); p.setInt(2, loanId); p.executeUpdate();
+        }
+    }
+
+    public List<Loan> activeLoans() throws SQLException {
+        String sql = "SELECT * FROM loans WHERE return_date IS NULL";
+        List<Loan> out = new ArrayList<>();
+        try (Connection c = Database.getConnection(); Statement s = c.createStatement(); ResultSet r = s.executeQuery(sql)) {
+            while (r.next()) out.add(map(r));
+        }
+        return out;
+    }
+
+    public List<Loan> all() throws SQLException {
+        String sql = "SELECT * FROM loans";
+        List<Loan> out = new ArrayList<>();
+        try (Connection c = Database.getConnection(); Statement s = c.createStatement(); ResultSet r = s.executeQuery(sql)) {
+            while (r.next()) out.add(map(r));
+        }
+        return out;
+    }
+
+    private Loan map(ResultSet r) throws SQLException {
+        Loan l = new Loan();
+        l.setId(r.getInt("id"));
+        l.setBookId(r.getInt("book_id"));
+        l.setMemberId(r.getInt("member_id"));
+        l.setLoanDate(r.getString("loan_date"));
+        l.setDueDate(r.getString("due_date"));
+        l.setReturnDate(r.getString("return_date"));
+        return l;
+    }
+}
+```
+
+---
+
+## src/main/java/library/ui/LibraryGUI.java
+```java
+package library.ui;
+
+import javax.swing.*;
+import java.awt.*;
+import library.Database;
+
+public class LibraryGUI {
+    public static void createAndShow() {
+        JFrame frame = new JFrame("Library Management System");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(1000, 700);
+
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("Books", new BookPanel());
+        tabs.addTab("Members", new MemberPanel());
+        tabs.addTab("Loans", new LoanPanel());
+
+        frame.getContentPane().add(tabs, BorderLayout.CENTER);
+        frame.setLocationRelativeTo(null);
+        frame.setVisible(true);
+    }
+}
+```
+
+---
+
+## src/main/java/library/ui/BookPanel.java
+```java
+package library.ui;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import library.dao.BookDAO;
+import library.models.Book;
+import java.awt.*;
+import java.awt.event.*;
+import java.sql.SQLException;
+import java.util.List;
+
+public class BookPanel extends JPanel {
+    private BookDAO dao = new BookDAO();
+    private DefaultTableModel model;
+    private JTable table;
+    private JTextField tfSearch;
+
+    public BookPanel() {
+        setLayout(new BorderLayout());
+        model = new DefaultTableModel(new String[]{"ID","ISBN","Title","Author","Year","Copies"},0) { public boolean isCellEditable(int r,int c){return false;} };
+        table = new JTable(model);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        tfSearch = new JTextField(30);
+        JButton bSearch = new JButton("Search");
+        JButton bAdd = new JButton("Add Book");
+        JButton bEdit = new JButton("Edit");
+        JButton bDel = new JButton("Delete");
+        top.add(new JLabel("Search:")); top.add(tfSearch); top.add(bSearch); top.add(bAdd); top.add(bEdit); top.add(bDel);
+        add(top, BorderLayout.NORTH);
+
+        bSearch.addActionListener(e -> load(tfSearch.getText()));
+        bAdd.addActionListener(e -> openEditor(null));
+        bEdit.addActionListener(e -> {int r = table.getSelectedRow(); if(r==-1){ JOptionPane.showMessageDialog(this,"Select a row"); return;} int id = (int) model.getValueAt(r,0); try{ Book b = dao.findById(id); openEditor(b);}catch(Exception ex){ex.printStackTrace();}});
+        bDel.addActionListener(e -> {int r = table.getSelectedRow(); if(r==-1){ JOptionPane.showMessageDialog(this,"Select a row"); return;} int id = (int) model.getValueAt(r,0); if(JOptionPane.showConfirmDialog(this,"Delete?","Confirm",JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION){ try{ dao.delete(id); load(""); }catch(Exception ex){ex.printStackTrace();}}});
+
+        load("");
+    }
+
+    private void load(String q) {
+        try {
+            model.setRowCount(0);
+            List<Book> books = q==null||q.isEmpty()?dao.all():dao.search(q);
+            for (Book b: books) model.addRow(new Object[]{b.getId(), b.getIsbn(), b.getTitle(), b.getAuthor(), b.getYear(), b.getCopies()});
+        } catch (SQLException ex) { ex.printStackTrace(); }
+    }
+
+    private void openEditor(Book b) {
+        JTextField isbn = new JTextField();
+        JTextField title = new JTextField();
+        JTextField author = new JTextField();
+        JTextField publisher = new JTextField();
+        JTextField year = new JTextField();
+        JTextField copies = new JTextField();
+        if (b!=null){ isbn.setText(b.getIsbn()); title.setText(b.getTitle()); author.setText(b.getAuthor()); publisher.setText(b.getPublisher()); year.setText(String.valueOf(b.getYear())); copies.setText(String.valueOf(b.getCopies())); }
+        Object[] fields = {"ISBN", isbn, "Title", title, "Author", author, "Publisher", publisher, "Year", year, "Copies", copies};
+        int option = JOptionPane.showConfirmDialog(this, fields, b==null?"Add Book":"Edit Book", JOptionPane.OK_CANCEL_OPTION);
+        if (option==JOptionPane.OK_OPTION) {
+            try {
+                if (b==null) b = new Book();
+                b.setIsbn(isbn.getText()); b.setTitle(title.getText()); b.setAuthor(author.getText()); b.setPublisher(publisher.getText()); b.setYear(Integer.parseInt(year.getText())); b.setCopies(Integer.parseInt(copies.getText()));
+                if (b.getId()==0) dao.add(b); else dao.update(b);
+                load("");
+            } catch (Exception ex) { ex.printStackTrace(); JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage()); }
+        }
+    }
+}
+```
+
+---
+
+## src/main/java/library/ui/MemberPanel.java
+```java
+package library.ui;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import library.dao.MemberDAO;
+import library.models.Member;
+import java.awt.*;
+import java.sql.SQLException;
+import java.util.List;
+
+public class MemberPanel extends JPanel {
+    private MemberDAO dao = new MemberDAO();
+    private DefaultTableModel model;
+    private JTable table;
+    private JTextField tfSearch;
+
+    public MemberPanel() {
+        setLayout(new BorderLayout());
+        model = new DefaultTableModel(new String[]{"ID","MemberID","Name","Email","Phone"},0) { public boolean isCellEditable(int r,int c){return false;} };
+        table = new JTable(model);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        tfSearch = new JTextField(30);
+        JButton bSearch = new JButton("Search");
+        JButton bAdd = new JButton("Add Member");
+        JButton bEdit = new JButton("Edit");
+        JButton bDel = new JButton("Delete");
+        top.add(new JLabel("Search:")); top.add(tfSearch); top.add(bSearch); top.add(bAdd); top.add(bEdit); top.add(bDel);
+        add(top, BorderLayout.NORTH);
+
+        bSearch.addActionListener(e -> load(tfSearch.getText()));
+        bAdd.addActionListener(e -> openEditor(null));
+        bEdit.addActionListener(e -> {int r = table.getSelectedRow(); if(r==-1){ JOptionPane.showMessageDialog(this,"Select a row"); return;} int id = (int) model.getValueAt(r,0); try{ Member m = dao.findById(id); openEditor(m);}catch(Exception ex){ex.printStackTrace();}});
+        bDel.addActionListener(e -> {int r = table.getSelectedRow(); if(r==-1){ JOptionPane.showMessageDialog(this,"Select a row"); return;} int id = (int) model.getValueAt(r,0); if(JOptionPane.showConfirmDialog(this,"Delete?","Confirm",JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION){ try{ dao.delete(id); load(""); }catch(Exception ex){ex.printStackTrace();}}});
+
+        load("");
+    }
+
+    private void load(String q) {
+        try {
+            model.setRowCount(0);
+            List<Member> items = q==null||q.isEmpty()?dao.all():dao.search(q);
+            for (Member m: items) model.addRow(new Object[]{m.getId(), m.getMemberId(), m.getName(), m.getEmail(), m.getPhone()});
+        } catch (SQLException ex) { ex.printStackTrace(); }
+    }
+
+    private void openEditor(Member m) {
+        JTextField memberId = new JTextField();
+        JTextField name = new JTextField();
+        JTextField email = new JTextField();
+        JTextField phone = new JTextField();
+        if (m!=null){ memberId.setText(m.getMemberId()); name.setText(m.getName()); email.setText(m.getEmail()); phone.setText(m.getPhone()); }
+        Object[] fields = {"Member ID", memberId, "Name", name, "Email", email, "Phone", phone};
+        int option = JOptionPane.showConfirmDialog(this, fields, m==null?"Add Member":"Edit Member", JOptionPane.OK_CANCEL_OPTION);
+        if (option==JOptionPane.OK_OPTION) {
+            try {
+                if (m==null) m = new Member();
+                m.setMemberId(memberId.getText()); m.setName(name.getText()); m.setEmail(email.getText()); m.setPhone(phone.getText());
+                if (m.getId()==0) dao.add(m); else dao.update(m);
+                load("");
+            } catch (Exception ex) { ex.printStackTrace(); JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage()); }
+        }
+    }
+}
+```
+
+---
+
+## src/main/java/library/ui/LoanPanel.java
+```java
+package library.ui;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import library.dao.LoanDAO;
+import library.dao.BookDAO;
+import library.dao.MemberDAO;
+import library.models.Loan;
+import library.models.Book;
+import library.models.Member;
+import java.awt.*;
+import java.sql.SQLException;
+import java.time.LocalDate;
+import java.util.List;
+
+public class LoanPanel extends JPanel {
+    private LoanDAO dao = new LoanDAO();
+    private BookDAO bookDao = new BookDAO();
+    private MemberDAO memberDao = new MemberDAO();
+    private DefaultTableModel model;
+    private JTable table;
+
+    public LoanPanel() {
+        setLayout(new BorderLayout());
+        model = new DefaultTableModel(new String[]{"LoanID","BookID","MemberID","LoanDate","DueDate","ReturnDate"},0) { public boolean isCellEditable(int r,int c){return false;} };
+        table = new JTable(model);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton bLend = new JButton("Lend Book");
+        JButton bReturn = new JButton("Mark Returned");
+        JButton bRefresh = new JButton("Refresh");
+        top.add(bLend); top.add(bReturn); top.add(bRefresh);
+        add(top, BorderLayout.NORTH);
+
+        bLend.addActionListener(e -> lendDialog());
+        bReturn.addActionListener(e -> {int r = table.getSelectedRow(); if(r==-1){ JOptionPane.showMessageDialog(this,"Select loan row"); return;} int id = (int) model.getValueAt(r,0); try{ dao.markReturned(id, LocalDate.now().toString()); load(); }catch(Exception ex){ex.printStackTrace();}});
+        bRefresh.addActionListener(e -> load());
+        load();
+    }
+
+    private void load() {
+        try{
+            model.setRowCount(0);
+            List<Loan> list = dao.all();
+            for(Loan l: list) model.addRow(new Object[]{l.getId(), l.getBookId(), l.getMemberId(), l.getLoanDate(), l.getDueDate(), l.getReturnDate()});
+        }catch(SQLException ex){ ex.printStackTrace(); }
+    }
+
+    private void lendDialog() {
+        try{
+            List<Book> books = bookDao.all();
+            List<Member> members = memberDao.all();
+            if (books.isEmpty() || members.isEmpty()) { JOptionPane.showMessageDialog(this,"Add at least one book and one member first"); return; }
+            JComboBox<Book> cbBook = new JComboBox<>(books.toArray(new Book[0]));
+            JComboBox<Member> cbMember = new JComboBox<>(members.toArray(new Member[0]));
+
+            // override toString for display
+            cbBook.setRenderer(new DefaultListCellRenderer(){ public Component getListCellRendererComponent(JList<?> l,Object v,int i,boolean s,boolean f){ if(v instanceof Book){ Book b=(Book)v; v=b.getTitle()+" (ID:"+b.getId()+")"; } return super.getListCellRendererComponent(l,v,i,s,f);} });
+            cbMember.setRenderer(new DefaultListCellRenderer(){ public Component getListCellRendererComponent(JList<?> l,Object v,int i,boolean s,boolean f){ if(v instanceof Member){ Member m=(Member)v; v=m.getName()+" (ID:"+m.getId()+")";} return super.getListCellRendererComponent(l,v,i,s,f);} });
+
+            JTextField tfDays = new JTextField("14");
+            Object[] fields = {"Book", cbBook, "Member", cbMember, "Loan days", tfDays};
+            int opt = JOptionPane.showConfirmDialog(this, fields, "Lend Book", JOptionPane.OK_CANCEL_OPTION);
+            if (opt == JOptionPane.OK_OPTION) {
+                Book selBook = (Book) cbBook.getSelectedItem();
+                Member selMember = (Member) cbMember.getSelectedItem();
+                int days = Integer.parseInt(tfDays.getText());
+                Loan l = new Loan();
+                l.setBookId(selBook.getId()); l.setMemberId(selMember.getId());
+                l.setLoanDate(LocalDate.now().toString()); l.setDueDate(LocalDate.now().plusDays(days).toString()); l.setReturnDate(null);
+                dao.lend(l);
+                load();
+            }
+        }catch(Exception ex){ ex.printStackTrace(); }
+    }
+}
+```
+
+---
+
+## src/main/java/library/Main.java
+```java
+package library;
+
+import library.Database;
+import javax.swing.SwingUtilities;
+import library.ui.LibraryGUI;
+
+public class Main {
+    public static void main(String[] args) {
+        Database.init();
+        SwingUtilities.invokeLater(() -> LibraryGUI.createAndShow());
+    }
+}
+```
+
+---
+
+## README.md (brief)
+```markdown
+# Library Management System
+
+## Requirements
+- Java 11+
+- Maven
+
+## Build & Run
+1. mvn package
+2. java -jar target/library-management-1.0-SNAPSHOT.jar
+
+Database file `library.db` will be created in the working directory. Schema is loaded from `src/main/resources/schema.sql`.
+```
+
+---
+
+## Notes & Next steps
+- This project is intentionally simple and designed to be easy to extend.
+- Add input validation, better exception handling, logging, and unit tests.
+- You can add export-to-CSV, PDF reports, or integrate JavaFX for a modern UI.
+
+
+---
+
+End of project files. Save them into the appropriate directories and run `mvn package` then `java -jar target/library-management-1.0-SNAPSHOT.jar`.
